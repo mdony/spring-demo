@@ -1,28 +1,85 @@
-trigger:
-- master
+variables:
+  
+ 
+  - name: dockerRegistryServiceConnection
+    value: 'acrRegistryServiceConnection1' # make sure it matches the name you used in the service connection
+  
+  - name: acrEndpoint
+    value: 'mdstechacr.azurecr.io' # replace with container registry endpoint
 
-pool:
-  vmImage: 'ubuntu-latest'
+  - name: tag
+    value: '$(Build.BuildId)'
 
-steps:
-- task: Docker@2
-  displayName: Login to ACR
-  inputs:
-    command: login
-    containerRegistry: acrRegistryServiceConnection1
-- task: Maven@3
-  inputs:
-    mavenPomFile: 'pom.xml'
-    mavenOptions: '-Xmx3072m'
-    javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '1.8'
-    jdkArchitectureOption: 'x64'
-    publishJUnitResults: false
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-    goals: 'package -Dmaven.test.skip=true'
-- task: Docker@2
-  displayName: Build and Push
-  inputs:
-    command: buildAndPush
-    repository: spring-demo
-    tags: latest
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:  
+  - job: Build
+    displayName: Build job
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: Docker@2
+      displayName: Login to ACR
+      inputs:
+        command: login
+        containerRegistry: acrRegistryServiceConnection1
+    - task: Maven@3
+      inputs:
+        mavenPomFile: 'pom.xml'
+        mavenOptions: '-Xmx3072m'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.8'
+        jdkArchitectureOption: 'x64'
+        publishJUnitResults: false
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        goals: 'package -Dmaven.test.skip=true'
+    
+    
+    - task: Docker@2
+      displayName: Build and push an image to container registry
+      inputs:
+        command: buildAndPush
+        repository: springbootdemo
+        dockerfile: '**/Dockerfile'
+        containerRegistry: $(dockerRegistryServiceConnection)
+        tags: $(tag)
+
+    - task: PublishPipelineArtifact@0
+      inputs:
+        artifactName: 'manifests'
+        targetPath: 'manifests'
+
+- stage: DeployDev
+  displayName: Deploy to dev stage
+  dependsOn: Build
+
+  variables:
+  - name: k8sNamespace # Kubernetes Namespace to deploy to. This variable is scoped to the DeployDev stage.
+    value: 'dev-spring'
+      
+  jobs:
+  - deployment: DeployDev
+    displayName: Deploy to dev job
+    pool:
+      vmImage: ubuntu-latest
+
+    environment: 'dev.dev-spring' # name of the environment to target [env name.namespace]. This will pull in the Kubernetes service connection automatically
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@1
+            inputs:
+              artifactName: 'manifests'
+              downloadPath: '$(System.ArtifactsDirectory)/manifests'
+
+
+          - task: KubernetesManifest@0
+            displayName: Deploy to Kubernetes cluster
+            inputs:
+              action: deploy
+              namespace: $(k8sNamespace)
+              manifests: $(System.ArtifactsDirectory)/manifests/*
+              containers: '$(acrEndpoint)/springbootdemo:$(tag)'
