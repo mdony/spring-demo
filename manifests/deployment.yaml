@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springbootdemo
+spec:
+  selector:
+      matchLabels:
+        app: springbootdemo
+  replicas: 2
+  template:
+      metadata:
+        labels:
+            app: springbootdemo
+      spec:
+        containers:
+        - name: springbootdemo
+          image: mdstechacr.azurecr.io/springbootdemo:placeholdertag # replace with your own repository. Due to a bug, leave the :placeholdertag tag in there to allow the pipeline to replace it
+          imagePullPolicy: Always
+         
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "128Mi"
+              cpu: "500m"
+          env:
+          - name: TEAMNAME
+            value: 'team-azch' # will be patched at deployment time by value of 'teamName' in the variable group
+   
+          ports:
+          - containerPort: 80
